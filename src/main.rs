@@ -1,9 +1,21 @@
+use rdev::{listen, simulate, EventType, Key, SimulateError, Button};
 use std::thread;
-use std::time::{Instant};
+use std::time::{Duration, Instant};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc;
 use rand::Rng;
 use eframe::{egui, App, NativeOptions};
+
+// Function for performing real mouse clicks
+fn click_mouse() {
+    if let Err(e) = simulate(&EventType::ButtonPress(Button::Left)) {
+        eprintln!("Failed to simulate mouse press: {:?}", e);
+    }
+    thread::sleep(Duration::from_millis(50)); // Small delay to simulate real click
+    if let Err(e) = simulate(&EventType::ButtonRelease(Button::Left)) {
+        eprintln!("Failed to simulate mouse release: {:?}", e);
+    }
+}
 
 // Function for performing clicks in regular mode
 fn regular_clicker(interval: u64, running: Arc<Mutex<bool>>, tx: mpsc::Sender<String>) {
@@ -11,6 +23,7 @@ fn regular_clicker(interval: u64, running: Arc<Mutex<bool>>, tx: mpsc::Sender<St
     while *running.lock().unwrap() {
         let interval = if interval < 1 { 1 } else { interval }; // Minimum interval value 1 ms
         if last_click.elapsed().as_millis() >= interval as u128 {
+            click_mouse();
             tx.send("Click!".to_string()).unwrap();
             last_click = Instant::now();
         }
@@ -25,6 +38,7 @@ fn jitter_clicker(min_interval: u64, max_interval: u64, jitter: u64, running: Ar
         let min_interval = if min_interval < 1 { 1 } else { min_interval }; // Minimum interval value 1 ms
         let interval = rng.gen_range(min_interval..=max_interval) + rng.gen_range(0..=jitter);
         if last_click.elapsed().as_millis() >= interval as u128 {
+            click_mouse();
             tx.send(format!("Click with jitter: {} ms", interval)).unwrap();
             last_click = Instant::now();
         }
@@ -40,7 +54,7 @@ struct AutoClickerApp {
     running_regular: Arc<Mutex<bool>>,
     running_jitter: Arc<Mutex<bool>>,
     tx: mpsc::Sender<String>,
-    rx: mpsc::Receiver<String>,
+    rx: Arc<Mutex<mpsc::Receiver<String>>>,
     is_running_regular: bool,
     is_running_jitter: bool,
     enable_jitter: bool,
@@ -69,52 +83,14 @@ impl App for AutoClickerApp {
                 ui.add_space(10.0); // Space between input and start button
 
                 // Start/Stop button
-                let button_text = if self.is_running_regular || self.is_running_jitter { "STOP" } else { "START" };
+                let button_text = if self.is_running_regular || self.is_running_jitter { "STOP" } else { "START[F9]" };
                 let button_style = egui::Button::new(button_text)
                     .min_size(egui::Vec2::new(250.0, 100.0)) // Increased button size
                     .rounding(egui::Rounding::same(10.0))
                     .wrap();
 
                 if ui.add(button_style).clicked() {
-                    if self.is_running_regular || self.is_running_jitter {
-                        if self.is_running_regular {
-                            let mut running = self.running_regular.lock().unwrap();
-                            *running = false;
-                            self.logs.lock().unwrap().push("Regular mode stopped.".to_string());
-                            self.is_running_regular = false;
-                        }
-                        if self.is_running_jitter {
-                            let mut running = self.running_jitter.lock().unwrap();
-                            *running = false;
-                            self.logs.lock().unwrap().push("Jitter mode stopped.".to_string());
-                            self.is_running_jitter = false;
-                        }
-                    } else {
-                        let running = Arc::clone(&self.running_regular);
-                        *running.lock().unwrap() = true;
-                        let interval = self.interval;
-                        let tx = self.tx.clone();
-                        let logs = Arc::clone(&self.logs);
-
-                        if self.enable_jitter {
-                            let min_interval = self.min_interval;
-                            let max_interval = self.max_interval;
-                            let jitter = self.jitter;
-                            let running_jitter = Arc::clone(&self.running_jitter);
-                            *running_jitter.lock().unwrap() = true;
-                            thread::spawn(move || {
-                                jitter_clicker(min_interval, max_interval, jitter, Arc::clone(&running_jitter), tx);
-                                logs.lock().unwrap().push("Jitter mode started.".to_string());
-                            });
-                            self.is_running_jitter = true;
-                        } else {
-                            thread::spawn(move || {
-                                regular_clicker(interval, Arc::clone(&running), tx);
-                                logs.lock().unwrap().push("Regular mode started.".to_string());
-                            });
-                            self.is_running_regular = true;
-                        }
-                    }
+                    self.toggle_clicker();
                 }
 
                 ui.add_space(20.0); // Space between start button and jitter toggle
@@ -174,8 +150,68 @@ impl App for AutoClickerApp {
                 });
         });
 
-        while let Ok(log) = self.rx.try_recv() {
+        while let Ok(log) = self.rx.lock().unwrap().try_recv() {
             self.logs.lock().unwrap().push(log);
+        }
+    }
+}
+
+impl AutoClickerApp {
+    fn toggle_clicker(&mut self) {
+        if self.is_running_regular || self.is_running_jitter {
+            if self.is_running_regular {
+                let mut running = self.running_regular.lock().unwrap();
+                *running = false;
+                self.logs.lock().unwrap().push("Regular mode stopped.".to_string());
+                self.is_running_regular = false;
+            }
+            if self.is_running_jitter {
+                let mut running = self.running_jitter.lock().unwrap();
+                *running = false;
+                self.logs.lock().unwrap().push("Jitter mode stopped.".to_string());
+                self.is_running_jitter = false;
+            }
+        } else {
+            let running = Arc::clone(&self.running_regular);
+            *running.lock().unwrap() = true;
+            let interval = self.interval;
+            let tx = self.tx.clone();
+            let logs = Arc::clone(&self.logs);
+
+            if self.enable_jitter {
+                let min_interval = self.min_interval;
+                let max_interval = self.max_interval;
+                let jitter = self.jitter;
+                let running_jitter = Arc::clone(&self.running_jitter);
+                *running_jitter.lock().unwrap() = true;
+                thread::spawn(move || {
+                    jitter_clicker(min_interval, max_interval, jitter, Arc::clone(&running_jitter), tx);
+                    logs.lock().unwrap().push("Jitter mode started.".to_string());
+                });
+                self.is_running_jitter = true;
+            } else {
+                thread::spawn(move || {
+                    regular_clicker(interval, Arc::clone(&running), tx);
+                    logs.lock().unwrap().push("Regular mode started.".to_string());
+                });
+                self.is_running_regular = true;
+            }
+        }
+    } 
+    fn clone_instance(&self) -> AutoClickerApp {
+        AutoClickerApp {
+            interval: self.interval,
+            min_interval: self.min_interval,
+            max_interval: self.max_interval,
+            jitter: self.jitter,
+            logs: Arc::clone(&self.logs),
+            running_regular: Arc::clone(&self.running_regular),
+            running_jitter: Arc::clone(&self.running_jitter),
+            tx: self.tx.clone(),
+            rx: Arc::clone(&self.rx),
+            is_running_regular: self.is_running_regular,
+            is_running_jitter: self.is_running_jitter,
+            enable_jitter: self.enable_jitter,
         }
     }
 }
@@ -191,16 +227,33 @@ fn main() {
         running_regular: Arc::new(Mutex::new(false)),
         running_jitter: Arc::new(Mutex::new(false)),
         tx,
-        rx,
+        rx: Arc::new(Mutex::new(rx)),
         is_running_regular: false,
         is_running_jitter: false,
         enable_jitter: false,
     };
 
+    // Start a new thread for listening to the hotkey (F9)
+    let app_clone = Arc::new(Mutex::new(app));
+    let app_clone_for_thread = Arc::clone(&app_clone);
+    thread::spawn(move || {
+        if let Err(error) = listen(move |event| {
+            if let EventType::KeyPress(Key::F9) = event.event_type {
+                app_clone_for_thread.lock().unwrap().toggle_clicker();
+            }
+        }) {
+            eprintln!("Error: {:?}", error);
+        }
+    });
+
     let native_options = NativeOptions::default();
+
     eframe::run_native(
         "Autoclicker",
         native_options,
-        Box::new(|_cc| Ok(Box::new(app))),
-    );
+        Box::new(move |_cc| {
+            let app_instance = app_clone.lock().unwrap().clone_instance();
+            Ok(Box::new(app_instance) as Box<dyn App>)
+        }),
+    ).expect("Failed to run the application");
 }
