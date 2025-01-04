@@ -92,7 +92,7 @@ dependencies = [
  "hashbrown",
  "paste",
  "static_assertions",
- "windows",
+ "windows 0.58.0",
  "windows-core",
 ]
 
@@ -417,6 +417,7 @@ checksum = "ace50bade8e6234aa140d9a2f552bbee1db4d353f69b8217bc503490fc1a9f26"
 name = "autoclicker"
 version = "0.1.0"
 dependencies = [
+ "device_query",
  "eframe",
  "egui",
  "enigo",
@@ -810,6 +811,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "96a6ac251f4a2aca6b3f91340350eab87ae57c3f127ffeb585e92bd336717991"
 
 [[package]]
+name = "device_query"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bafa241a89a5edccff5057d0b85fbc083a781bd03d766c11a688331604980985"
+dependencies = [
+ "lazy_static",
+ "macos-accessibility-client",
+ "pkg-config",
+ "readkey",
+ "readmouse",
+ "windows 0.48.0",
+ "x11",
+]
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1013,7 +1029,7 @@ dependencies = [
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",
- "windows",
+ "windows 0.58.0",
  "xkbcommon",
  "xkeysym",
 ]
@@ -1756,6 +1772,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a7a70ba024b9dc04c27ea2f0c0548feb474ec5c54bba33a7f72f873a39d07b24"
 
 [[package]]
+name = "macos-accessibility-client"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edf7710fbff50c24124331760978fb9086d6de6288dcdb38b25a97f8b1bdebbb"
+dependencies = [
+ "core-foundation 0.9.4",
+ "core-foundation-sys 0.8.7",
+]
+
+[[package]]
 name = "malloc_buf"
 version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2398,6 +2424,18 @@ dependencies = [
  "winapi",
  "x11",
 ]
+
+[[package]]
+name = "readkey"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7677f98ca49bc9bb26e04c8abf80ba579e2cb98e8a384a0ff8128ad70670d249"
+
+[[package]]
+name = "readmouse"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be105c72a1e6a5a1198acee3d5b506a15676b74a02ecd78060042a447f408d94"
 
 [[package]]
 name = "redox_syscall"
@@ -3183,7 +3221,7 @@ dependencies = [
  "wasm-bindgen",
  "web-sys",
  "wgpu-types",
- "windows",
+ "windows 0.58.0",
 ]
 
 [[package]]
@@ -3227,6 +3265,15 @@ name = "winapi-x86_64-pc-windows-gnu"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
+
+[[package]]
+name = "windows"
+version = "0.48.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e686886bc078bc1b0b600cac0147aadb815089b6e4da64016cbd754b6342700f"
+dependencies = [
+ "windows-targets 0.48.5",
+]
 
 [[package]]
 name = "windows"
