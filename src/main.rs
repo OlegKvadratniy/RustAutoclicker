@@ -1,10 +1,11 @@
-use rdev::{listen, simulate, EventType, Key, SimulateError, Button};
+use rdev::{simulate, EventType, Key as RdevKey, Button};
 use std::thread;
 use std::time::{Duration, Instant};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc;
 use rand::Rng;
 use eframe::{egui, App, NativeOptions};
+use enigo::{Enigo, Key as EnigoKey, Settings, Direction, InputResult};
 
 // Function for performing real mouse clicks
 fn click_mouse() {
@@ -55,12 +56,12 @@ struct AutoClickerApp {
     running_jitter: Arc<Mutex<bool>>,
     tx: mpsc::Sender<String>,
     rx: Arc<Mutex<mpsc::Receiver<String>>>,
-    is_running_regular: bool,
-    is_running_jitter: bool,
-    enable_jitter: bool,
+    is_running_regular: Arc<Mutex<bool>>,
+    is_running_jitter: Arc<Mutex<bool>>,
+    enable_jitter: Arc<Mutex<bool>>,
 }
 
-impl App for AutoClickerApp {
+impl eframe::App for AutoClickerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Autoclicker");
@@ -83,7 +84,7 @@ impl App for AutoClickerApp {
                 ui.add_space(10.0); // Space between input and start button
 
                 // Start/Stop button
-                let button_text = if self.is_running_regular || self.is_running_jitter { "STOP" } else { "START[F9]" };
+                let button_text = if *self.is_running_regular.lock().unwrap() || *self.is_running_jitter.lock().unwrap() { "STOP" } else { "START[F9]" };
                 let button_style = egui::Button::new(button_text)
                     .min_size(egui::Vec2::new(250.0, 100.0)) // Increased button size
                     .rounding(egui::Rounding::same(10.0))
@@ -96,11 +97,11 @@ impl App for AutoClickerApp {
                 ui.add_space(20.0); // Space between start button and jitter toggle
 
                 // Jitter Mode Toggle and Inputs
-                ui.checkbox(&mut self.enable_jitter, "Enable Jitter Mode");
+                ui.checkbox(&mut *self.enable_jitter.lock().unwrap(), "Enable Jitter Mode");
 
                 ui.add_space(10.0); // Space between checkbox and jitter settings
 
-                if self.enable_jitter {
+                if *self.enable_jitter.lock().unwrap() {
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new("Min Interval (ms):").size(18.0));
                         ui.add(
@@ -158,27 +159,31 @@ impl App for AutoClickerApp {
 
 impl AutoClickerApp {
     fn toggle_clicker(&mut self) {
-        if self.is_running_regular || self.is_running_jitter {
-            if self.is_running_regular {
+        if *self.is_running_regular.lock().unwrap() || *self.is_running_jitter.lock().unwrap() {
+            // Остановка автокликера
+            if *self.is_running_regular.lock().unwrap() {
                 let mut running = self.running_regular.lock().unwrap();
                 *running = false;
                 self.logs.lock().unwrap().push("Regular mode stopped.".to_string());
-                self.is_running_regular = false;
+                let mut is_running = self.is_running_regular.lock().unwrap();
+                *is_running = false;
             }
-            if self.is_running_jitter {
+            if *self.is_running_jitter.lock().unwrap() {
                 let mut running = self.running_jitter.lock().unwrap();
                 *running = false;
                 self.logs.lock().unwrap().push("Jitter mode stopped.".to_string());
-                self.is_running_jitter = false;
+                let mut is_running = self.is_running_jitter.lock().unwrap();
+                *is_running = false;
             }
         } else {
+            // Запуск автокликера
             let running = Arc::clone(&self.running_regular);
             *running.lock().unwrap() = true;
             let interval = self.interval;
             let tx = self.tx.clone();
             let logs = Arc::clone(&self.logs);
 
-            if self.enable_jitter {
+            if *self.enable_jitter.lock().unwrap() {
                 let min_interval = self.min_interval;
                 let max_interval = self.max_interval;
                 let jitter = self.jitter;
@@ -188,17 +193,20 @@ impl AutoClickerApp {
                     jitter_clicker(min_interval, max_interval, jitter, Arc::clone(&running_jitter), tx);
                     logs.lock().unwrap().push("Jitter mode started.".to_string());
                 });
-                self.is_running_jitter = true;
+                let mut is_running = self.is_running_jitter.lock().unwrap();
+                *is_running = true;
             } else {
                 thread::spawn(move || {
                     regular_clicker(interval, Arc::clone(&running), tx);
                     logs.lock().unwrap().push("Regular mode started.".to_string());
                 });
-                self.is_running_regular = true;
+                let mut is_running = self.is_running_regular.lock().unwrap();
+                *is_running = true;
             }
         }
-    } 
-    fn clone_instance(&self) -> AutoClickerApp {
+    }
+
+        fn clone_instance(&self) -> AutoClickerApp {
         AutoClickerApp {
             interval: self.interval,
             min_interval: self.min_interval,
@@ -209,51 +217,57 @@ impl AutoClickerApp {
             running_jitter: Arc::clone(&self.running_jitter),
             tx: self.tx.clone(),
             rx: Arc::clone(&self.rx),
-            is_running_regular: self.is_running_regular,
-            is_running_jitter: self.is_running_jitter,
-            enable_jitter: self.enable_jitter,
+            is_running_regular: Arc::clone(&self.is_running_regular),
+            is_running_jitter: Arc::clone(&self.is_running_jitter),
+            enable_jitter: Arc::clone(&self.enable_jitter),
         }
     }
 }
 
-fn main() {
+// Function to set up the hotkey listener
+fn setup_hotkey_listener(app: Arc<Mutex<AutoClickerApp>>) {
+    thread::spawn(move || {
+        let settings = Settings::default();
+        let mut enigo = Enigo::new(&settings).expect("Failed to create Enigo instance");
+
+        loop {
+            if enigo.key(EnigoKey::F9, Direction::Press).is_ok() {
+                app.lock().unwrap().toggle_clicker();
+                enigo.key(EnigoKey::F9, Direction::Release).unwrap();
+            }
+
+            thread::sleep(Duration::from_millis(100));
+        }
+    });
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (tx, rx) = mpsc::channel();
-    let app = AutoClickerApp {
-        interval: 1000,
-        min_interval: 500,
-        max_interval: 1500,
-        jitter: 100,
-        logs: Arc::new(Mutex::new(Vec::new())),
+    let app = Arc::new(Mutex::new(AutoClickerApp {
+        interval: 100,
+        min_interval: 100,
+        max_interval: 200,
+        jitter: 50,
+        logs: Arc::new(Mutex::new(vec![])),
         running_regular: Arc::new(Mutex::new(false)),
         running_jitter: Arc::new(Mutex::new(false)),
         tx,
         rx: Arc::new(Mutex::new(rx)),
-        is_running_regular: false,
-        is_running_jitter: false,
-        enable_jitter: false,
-    };
+        is_running_regular: Arc::new(Mutex::new(false)),
+        is_running_jitter: Arc::new(Mutex::new(false)),
+        enable_jitter: Arc::new(Mutex::new(false)),
+    }));
 
-    // Start a new thread for listening to the hotkey (F9)
-    let app_clone = Arc::new(Mutex::new(app));
-    let app_clone_for_thread = Arc::clone(&app_clone);
-    thread::spawn(move || {
-        if let Err(error) = listen(move |event| {
-            if let EventType::KeyPress(Key::F9) = event.event_type {
-                app_clone_for_thread.lock().unwrap().toggle_clicker();
-            }
-        }) {
-            eprintln!("Error: {:?}", error);
-        }
-    });
+    // Set up the hotkey listener
+    setup_hotkey_listener(Arc::clone(&app));
 
+    // Run the app
     let native_options = NativeOptions::default();
-
     eframe::run_native(
-        "Autoclicker",
+        "AutoClicker",
         native_options,
-        Box::new(move |_cc| {
-            let app_instance = app_clone.lock().unwrap().clone_instance();
-            Ok(Box::new(app_instance) as Box<dyn App>)
-        }),
-    ).expect("Failed to run the application");
+        Box::new(|_cc| Ok(Box::new(app.lock().unwrap().clone_instance()) as Box<dyn App>)),
+    )?;
+
+    Ok(())
 }
